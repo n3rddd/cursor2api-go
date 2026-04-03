@@ -33,10 +33,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/imroc/req/v3"
@@ -49,29 +46,14 @@ const cursorAPIURL = "https://cursor.com/api/chat"
 type CursorService struct {
 	config          *config.Config
 	client          *req.Client
-	mainJS          string
-	envJS           string
-	scriptCache     string
-	scriptCacheTime time.Time
-	scriptMutex     sync.RWMutex
 	headerGenerator *utils.HeaderGenerator
 }
 
 // NewCursorService creates a new service instance.
 func NewCursorService(cfg *config.Config) *CursorService {
-	mainJS, err := os.ReadFile(filepath.Join("jscode", "main.js"))
-	if err != nil {
-		logrus.Fatalf("failed to read jscode/main.js: %v", err)
-	}
-
-	envJS, err := os.ReadFile(filepath.Join("jscode", "env.js"))
-	if err != nil {
-		logrus.Fatalf("failed to read jscode/env.js: %v", err)
-	}
-
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		logrus.Warnf("failed to create cookie jar: %v", err)
+		logrus.Warnf("Failed to create cookie jar: %v", err)
 	}
 
 	client := req.C()
@@ -84,8 +66,6 @@ func NewCursorService(cfg *config.Config) *CursorService {
 	return &CursorService{
 		config:          cfg,
 		client:          client,
-		mainJS:          string(mainJS),
-		envJS:           string(envJS),
 		headerGenerator: utils.NewHeaderGenerator(),
 	}
 }
@@ -102,26 +82,15 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 		return nil, fmt.Errorf("failed to marshal cursor payload: %w", err)
 	}
 
-	// 尝试最多2次
 	maxRetries := 2
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		xIsHuman, err := s.fetchXIsHuman(ctx)
-		if err != nil {
-			if attempt < maxRetries {
-				logrus.WithError(err).Warnf("Failed to fetch x-is-human token (attempt %d/%d), retrying...", attempt, maxRetries)
-				time.Sleep(time.Second * time.Duration(attempt)) // 指数退避
-				continue
-			}
-			return nil, err
-		}
-
-		// 添加详细的调试日志
+		xIsHuman := utils.GenerateRandomString(64)
 		headers := s.chatHeaders(xIsHuman)
+
 		logrus.WithFields(logrus.Fields{
 			"url":            cursorAPIURL,
-			"x-is-human":     xIsHuman[:50] + "...", // 只显示前50个字符
-			"payload_length": len(jsonPayload),
 			"model":          request.Model,
+			"payload_length": len(jsonPayload),
 			"attempt":        attempt,
 		}).Debug("Sending request to Cursor API")
 
@@ -134,7 +103,7 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 		if err != nil {
 			if attempt < maxRetries {
 				logrus.WithError(err).Warnf("Cursor request failed (attempt %d/%d), retrying...", attempt, maxRetries)
-				time.Sleep(time.Second * time.Duration(attempt))
+				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
 			}
 			return nil, fmt.Errorf("cursor request failed: %w", err)
@@ -145,32 +114,15 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 			resp.Response.Body.Close()
 			message := strings.TrimSpace(string(body))
 
-			// 记录详细的错误信息
 			logrus.WithFields(logrus.Fields{
 				"status_code": resp.StatusCode,
 				"response":    message,
-				"headers":     resp.Header,
 				"attempt":     attempt,
 			}).Error("Cursor API returned non-OK status")
 
-			// 如果是 403 错误且还有重试机会,清除缓存并重试
 			if resp.StatusCode == http.StatusForbidden && attempt < maxRetries {
-				logrus.Warn("Received 403 Access Denied, refreshing browser fingerprint and clearing token cache...")
-
-				// 刷新浏览器指纹
+				logrus.Warn("Received 403, refreshing browser fingerprint...")
 				s.headerGenerator.Refresh()
-				logrus.WithFields(logrus.Fields{
-					"platform":       s.headerGenerator.GetProfile().Platform,
-					"chrome_version": s.headerGenerator.GetProfile().ChromeVersion,
-				}).Debug("Refreshed browser fingerprint")
-
-				// 清除 token 缓存
-				s.scriptMutex.Lock()
-				s.scriptCache = ""
-				s.scriptCacheTime = time.Time{}
-				s.scriptMutex.Unlock()
-
-				time.Sleep(time.Second * time.Duration(attempt))
 				continue
 			}
 
@@ -180,7 +132,6 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 			return nil, middleware.NewCursorWebError(resp.StatusCode, message)
 		}
 
-		// 成功,返回结果
 		output := make(chan interface{}, 32)
 		go s.consumeSSE(ctx, resp.Response, output, buildResult.ParseConfig)
 		return output, nil
@@ -197,7 +148,7 @@ type nonStreamCollectResult struct {
 	Text         string
 }
 
-func (s *CursorService) collectNonStream(ctx context.Context, gen <-chan interface{}, modelName string) (nonStreamCollectResult, error) {
+func (s *CursorService) collectNonStream(ctx context.Context, gen <-chan interface{}, _ string) (nonStreamCollectResult, error) {
 	var fullContent strings.Builder
 	var usage models.Usage
 	toolCalls := make([]models.ToolCall, 0, 2)
@@ -235,9 +186,6 @@ func (s *CursorService) collectNonStream(ctx context.Context, gen <-chan interfa
 					if v.ToolCall != nil {
 						toolCalls = append(toolCalls, *v.ToolCall)
 					}
-				case models.AssistantEventThinking:
-					// thinking 对于 OpenAI chat.completion 的 message.content 不直接暴露
-					continue
 				}
 			case string:
 				fullContent.WriteString(v)
@@ -245,8 +193,6 @@ func (s *CursorService) collectNonStream(ctx context.Context, gen <-chan interfa
 				usage = v
 			case error:
 				return nonStreamCollectResult{}, v
-			default:
-				continue
 			}
 		}
 	}
@@ -274,7 +220,7 @@ func (s *CursorService) withToolRetrySystemMessage(request *models.ChatCompletio
 	b.WriteString("TOOL USE REQUIRED.\n")
 	b.WriteString("Your next assistant message MUST be a tool call and must contain only the tool call in the exact bridge format. Do not output any natural language.\n")
 	if choice.Mode == "function" && strings.TrimSpace(choice.FunctionName) != "" {
-		b.WriteString(fmt.Sprintf("You MUST call function %q.\n", strings.TrimSpace(choice.FunctionName)))
+		fmt.Fprintf(&b, "You MUST call function %q.\n", strings.TrimSpace(choice.FunctionName))
 	} else {
 		b.WriteString("You MUST call at least one tool.\n")
 	}
@@ -285,9 +231,7 @@ func (s *CursorService) withToolRetrySystemMessage(request *models.ChatCompletio
 	return &cloned
 }
 
-// ChatCompletionNonStream runs a non-stream chat completion and returns a single OpenAI-compatible response.
-// It includes a Kilo-compatibility retry: if tools are provided and tool use is required but no tool_calls
-// are produced, it retries once with a stronger system instruction.
+// ChatCompletionNonStream runs a non-stream chat completion.
 func (s *CursorService) ChatCompletionNonStream(ctx context.Context, request *models.ChatCompletionRequest) (*models.ChatCompletionResponse, error) {
 	required, choice, err := s.toolCallRequiredForRequest(request)
 	if err != nil {
@@ -410,33 +354,11 @@ func (s *CursorService) consumeSSE(ctx context.Context, resp *http.Response, out
 		select {
 		case output <- errResp:
 		default:
-			logrus.WithError(err).Warn("failed to push SSE error to channel")
+			logrus.WithError(err).Warn("failed to push SSE scan error to channel")
 		}
-		return
 	}
 
 	flushParser()
-}
-
-func (s *CursorService) fetchXIsHuman(ctx context.Context) (string, error) {
-	// 鉴于 Cursor 的脚本 URL 频繁变动且 404 时随机 Token 依然可用，
-	// 直接生成随机 Token 以消除告警并提升响应速度。
-	token := utils.GenerateRandomString(64)
-	return token, nil
-}
-
-func (s *CursorService) prepareJS(cursorJS string) string {
-	replacer := strings.NewReplacer(
-		"$$currentScriptSrc$$", s.config.ScriptURL,
-		"$$UNMASKED_VENDOR_WEBGL$$", s.config.FP.UNMASKED_VENDOR_WEBGL,
-		"$$UNMASKED_RENDERER_WEBGL$$", s.config.FP.UNMASKED_RENDERER_WEBGL,
-		"$$userAgent$$", s.config.FP.UserAgent,
-	)
-
-	mainScript := replacer.Replace(s.mainJS)
-	mainScript = strings.Replace(mainScript, "$$env_jscode$$", s.envJS, 1)
-	mainScript = strings.Replace(mainScript, "$$cursor_jscode$$", cursorJS, 1)
-	return mainScript
 }
 
 func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) []models.CursorMessage {
@@ -449,7 +371,6 @@ func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) 
 	for _, msg := range messages {
 		total += cursorMessageTextLength(msg)
 	}
-
 	if total <= maxLength {
 		return messages
 	}
@@ -457,7 +378,8 @@ func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) 
 	var result []models.CursorMessage
 	startIdx := 0
 
-	if strings.EqualFold(messages[0].Role, "system") {
+	// Keep system message
+	if len(messages) > 0 && strings.EqualFold(messages[0].Role, "system") {
 		result = append(result, messages[0])
 		maxLength -= cursorMessageTextLength(messages[0])
 		if maxLength < 0 {
@@ -466,6 +388,7 @@ func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) 
 		startIdx = 1
 	}
 
+	// Collect most recent messages that fit within remaining budget
 	current := 0
 	collected := make([]models.CursorMessage, 0, len(messages)-startIdx)
 	for i := len(messages) - 1; i >= startIdx; i-- {
@@ -481,6 +404,7 @@ func (s *CursorService) truncateCursorMessages(messages []models.CursorMessage) 
 		current += msgLen
 	}
 
+	// Reverse to restore chronological order
 	for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
 		collected[i], collected[j] = collected[j], collected[i]
 	}
@@ -498,8 +422,4 @@ func cursorMessageTextLength(msg models.CursorMessage) int {
 
 func (s *CursorService) chatHeaders(xIsHuman string) map[string]string {
 	return s.headerGenerator.GetChatHeaders(xIsHuman)
-}
-
-func (s *CursorService) scriptHeaders() map[string]string {
-	return s.headerGenerator.GetScriptHeaders()
 }

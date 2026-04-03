@@ -23,57 +23,44 @@ package middleware
 import (
 	"cursor2api-go/models"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AuthRequired 认证中间件
-func AuthRequired() gin.HandlerFunc {
+// AuthRequired creates a Bearer token authentication middleware.
+// It accepts the expected API key directly, avoiding os.Getenv on every request.
+func AuthRequired(apiKey string) gin.HandlerFunc {
+	expected := "Bearer " + apiKey
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		
 		if authHeader == "" {
-			errorResponse := models.NewErrorResponse(
+			c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
 				"Missing authorization header",
 				"authentication_error",
 				"missing_auth",
-			)
-			c.JSON(http.StatusUnauthorized, errorResponse)
+			))
 			c.Abort()
 			return
 		}
-
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			errorResponse := models.NewErrorResponse(
-				"Invalid authorization format. Expected 'Bearer <token>'",
-				"authentication_error",
-				"invalid_auth_format",
-			)
-			c.JSON(http.StatusUnauthorized, errorResponse)
+		if authHeader != expected {
+			// Determine the specific error type for better client feedback
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+					"Invalid authorization format. Expected 'Bearer <token>'",
+					"authentication_error",
+					"invalid_auth_format",
+				))
+			} else {
+				c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+					"Invalid API key",
+					"authentication_error",
+					"invalid_api_key",
+				))
+			}
 			c.Abort()
 			return
 		}
-
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		expectedToken := os.Getenv("API_KEY")
-		if expectedToken == "" {
-			expectedToken = "0000" // 默认值
-		}
-
-		if token != expectedToken {
-			errorResponse := models.NewErrorResponse(
-				"Invalid API key",
-				"authentication_error",
-				"invalid_api_key",
-			)
-			c.JSON(http.StatusUnauthorized, errorResponse)
-			c.Abort()
-			return
-		}
-
-		// 认证通过，继续处理请求
 		c.Next()
 	}
 }

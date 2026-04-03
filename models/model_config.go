@@ -29,106 +29,47 @@ type ModelConfig struct {
 	CursorModel   string `json:"cursor_model"`
 }
 
-// GetModelConfigs 获取所有基础模型配置
-func GetModelConfigs() map[string]ModelConfig {
-	return map[string]ModelConfig{
-		"gemini-3-flash": {
-			ID:            "gemini-3-flash",
-			Provider:      "Google",
-			MaxTokens:     100000,
-			ContextWindow: 100000,
-			CursorModel:   "google/gemini-3-flash",
-		},
-		"claude-sonnet-4.6": {
-			ID:            "claude-sonnet-4.6",
-			Provider:      "Anthropic",
-			MaxTokens:     200000,
-			ContextWindow: 200000,
-			CursorModel:   "anthropic/claude-sonnet-4.6",
-		},
-		"anthropic/claude-sonnet-4.6": {
-			ID:            "anthropic/claude-sonnet-4.6",
-			Provider:      "Anthropic",
-			MaxTokens:     200000,
-			ContextWindow: 200000,
-			CursorModel:   "anthropic/claude-sonnet-4.6",
-		},
-		"claude-sonnet-4-5-20250929": {
-			ID:            "claude-sonnet-4-5-20250929",
-			Provider:      "Anthropic",
-			MaxTokens:     200000,
-			ContextWindow: 200000,
-			CursorModel:   "anthropic/claude-sonnet-4.6",
-		},
-		"claude-sonnet-4-20250514": {
-			ID:            "claude-sonnet-4-20250514",
-			Provider:      "Anthropic",
-			MaxTokens:     200000,
-			ContextWindow: 200000,
-			CursorModel:   "anthropic/claude-sonnet-4.6",
-		},
-		"claude-3-5-sonnet-20241022": {
-			ID:            "claude-3-5-sonnet-20241022",
-			Provider:      "Anthropic",
-			MaxTokens:     200000,
-			ContextWindow: 200000,
-			CursorModel:   "anthropic/claude-sonnet-4.6",
-		},
-	}
-}
-
-// GetModelConfig 获取指定模型的配置，支持公开 thinking 模型映射回基础模型
+// GetModelConfig 获取指定模型的配置，支持 thinking 模型映射回基础模型
 func GetModelConfig(modelID string) (ModelConfig, bool) {
 	configs := GetModelConfigs()
 	baseModel := TrimThinkingModel(modelID)
-	config, exists := configs[baseModel]
+	cfg, exists := configs[baseModel]
 	if !exists {
 		return ModelConfig{}, false
 	}
-
-	config.ID = modelID
-	return config, true
+	cfg.ID = modelID
+	return cfg, true
 }
 
 // GetCursorModel 获取Cursor API使用的模型名称
 func GetCursorModel(modelID string) string {
-	if config, exists := GetModelConfig(modelID); exists && config.CursorModel != "" {
-		return config.CursorModel
+	if cfg, exists := GetModelConfig(modelID); exists && cfg.CursorModel != "" {
+		return cfg.CursorModel
 	}
 	return TrimThinkingModel(modelID)
 }
 
 // GetMaxTokensForModel 获取指定模型的最大token数
 func GetMaxTokensForModel(modelID string) int {
-	if config, exists := GetModelConfig(modelID); exists {
-		return config.MaxTokens
+	if cfg, exists := GetModelConfig(modelID); exists {
+		return cfg.MaxTokens
 	}
 	return 4096
 }
 
 // GetContextWindowForModel 获取指定模型的上下文窗口大小
 func GetContextWindowForModel(modelID string) int {
-	if config, exists := GetModelConfig(modelID); exists {
-		return config.ContextWindow
+	if cfg, exists := GetModelConfig(modelID); exists {
+		return cfg.ContextWindow
 	}
 	return 128000
 }
 
 // ValidateMaxTokens 验证并调整max_tokens参数
 func ValidateMaxTokens(modelID string, requestedMaxTokens *int) *int {
-	modelMaxTokens := GetMaxTokensForModel(modelID)
-
-	if requestedMaxTokens == nil {
-		return &modelMaxTokens
+	modelMax := GetMaxTokensForModel(modelID)
+	if requestedMaxTokens == nil || *requestedMaxTokens <= 0 || *requestedMaxTokens > modelMax {
+		return &modelMax
 	}
-
-	if *requestedMaxTokens > modelMaxTokens {
-		return &modelMaxTokens
-	}
-
-	if *requestedMaxTokens <= 0 {
-		return &modelMaxTokens
-	}
-
 	return requestedMaxTokens
 }

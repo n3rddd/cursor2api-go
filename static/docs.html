@@ -237,6 +237,36 @@
             border-radius: 15px;
         }
 
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0 20px;
+            font-size: 0.9rem;
+        }
+        .param-table th {
+            background: #e9ecef;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        .param-table td {
+            padding: 6px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .param-table tr:last-child td {
+            border-bottom: none;
+        }
+        .param-table code {
+            background: #f0f4ff;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.85rem;
+        }
+        @media (max-width: 768px) {
+            .param-table { font-size: 0.8rem; }
+            .param-table th, .param-table td { padding: 5px 8px; }
+        }
+
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 2rem;
@@ -433,11 +463,39 @@ KILO_TOOL_STRICT=true
 
                 <div class="endpoint-card">
                     <div class="method-badge method-get">GET</div>
-                    <strong>/v1/models</strong>
-                    <p>获取所有可用的AI模型列表</p>
+                    <strong>/health</strong>
+                    <p>健康检查端点，用于确认服务是否正常运行</p>
                     <div class="code-block" style="margin-top: 15px;">
                         <button class="copy-btn" onclick="copyCode(this)">复制</button>
-                        <code>curl -H "Authorization: Bearer YOUR_KEY" {{BASE_URL}}/v1/models</code>
+                        <code>curl {{BASE_URL}}/health
+
+# 返回示例:
+{"status":"ok","timestamp":1775230770}</code>
+                    </div>
+                </div>
+
+                <div class="endpoint-card">
+                    <div class="method-badge method-get">GET</div>
+                    <strong>/v1/models</strong>
+                    <p>获取所有可用的AI模型列表（需要认证）</p>
+                    <div class="code-block" style="margin-top: 15px;">
+                        <button class="copy-btn" onclick="copyCode(this)">复制</button>
+                        <code>curl -H "Authorization: Bearer YOUR_KEY" {{BASE_URL}}/v1/models
+
+# 返回示例:
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "gemini-3-flash",
+      "object": "model",
+      "created": 1775230811,
+      "owned_by": "cursor2api",
+      "max_tokens": 100000,
+      "context_window": 100000
+    }
+  ]
+}</code>
                     </div>
                 </div>
 
@@ -445,32 +503,134 @@ KILO_TOOL_STRICT=true
                     <div class="method-badge method-post">POST</div>
                     <strong>/v1/chat/completions</strong>
                     <p>创建聊天完成请求，支持流式、非流式和 OpenAI 兼容 tool_calls</p>
-                    <div class="code-block" style="margin-top: 15px;">
+
+                    <h4 style="margin-top: 15px;">请求参数</h4>
+                    <table class="param-table">
+                        <tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>
+                        <tr><td><code>model</code></td><td>string</td><td>✅</td><td>模型ID</td></tr>
+                        <tr><td><code>messages</code></td><td>array</td><td>✅</td><td>消息列表，支持 <code>system</code>/<code>user</code>/<code>assistant</code>/<code>tool</code> 角色</td></tr>
+                        <tr><td><code>stream</code></td><td>boolean</td><td>❌</td><td>是否使用 SSE 流式响应，默认 <code>false</code></td></tr>
+                        <tr><td><code>temperature</code></td><td>number</td><td>❌</td><td>采样温度，范围 0~2</td></tr>
+                        <tr><td><code>max_tokens</code></td><td>integer</td><td>❌</td><td>最大生成 token 数，超出则自动截断为模型上限</td></tr>
+                        <tr><td><code>top_p</code></td><td>number</td><td>❌</td><td>核采样参数</td></tr>
+                        <tr><td><code>stop</code></td><td>array</td><td>❌</td><td>停止词序列</td></tr>
+                        <tr><td><code>user</code></td><td>string</td><td>❌</td><td>终端用户标识符</td></tr>
+                        <tr><td><code>tools</code></td><td>array</td><td>❌</td><td>工具定义列表，格式与 OpenAI 一致</td></tr>
+                        <tr><td><code>tool_choice</code></td><td>string|object</td><td>❌</td><td><code>"auto"</code> / <code>"none"</code> / <code>"required"</code> / 指定函数对象</td></tr>
+                    </table>
+
+                    <h4 style="margin-top: 15px;">基础示例（非流式）</h4>
+                    <div class="code-block">
                         <button class="copy-btn" onclick="copyCode(this)">复制</button>
                         <code>curl -X POST {{BASE_URL}}/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_KEY" \
   -d '{
     "model": "gemini-3-flash",
-    "messages": [
-      {"role": "user", "content": "你好"}
-    ],
+    "messages": [{"role": "user", "content": "你好"}],
     "stream": false
-  }'</code>
+  }'
+
+# 返回示例:
+{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion",
+  "created": 1775230770,
+  "model": "gemini-3-flash",
+  "choices": [{
+    "index": 0,
+    "message": {"role": "assistant", "content": "你好！有什么可以帮你的？"},
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}
+}</code>
                     </div>
+
+                    <h4 style="margin-top: 15px;">流式示例</h4>
+                    <div class="code-block">
+                        <button class="copy-btn" onclick="copyCode(this)">复制</button>
+                        <code>curl -X POST {{BASE_URL}}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{
+    "model": "gemini-3-flash",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true
+  }'
+
+# 返回格式为 SSE:
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1775230770,"model":"gemini-3-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1775230770,"model":"gemini-3-flash","choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","created":1775230770,"model":"gemini-3-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]</code>
+                    </div>
+
+                    <h4 style="margin-top: 15px;">工具调用（Tool Calls）</h4>
+                    <div class="code-block">
+                        <button class="copy-btn" onclick="copyCode(this)">复制</button>
+                        <code>curl -X POST {{BASE_URL}}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{
+    "model": "gemini-3-flash",
+    "messages": [{"role": "user", "content": "2+2等于几？使用计算器工具"}],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "执行算术运算",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {"type": "string"}
+          },
+          "required": ["expression"]
+        }
+      }
+    }],
+    "tool_choice": "auto"
+  }'
+
+# 非流式返回包含 tool_calls:
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_xxx",
+        "type": "function",
+        "function": {"name": "calculator", "arguments": "{\"expression\":\"2+2\"}"}
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}</code>
+                    </div>
+
                     <p style="margin-top: 10px; color: #555;">
-                        说明：当响应包含工具调用时，非流式会返回 <code>message.tool_calls</code> 且 <code>finish_reason="tool_calls"</code>；
-                        流式会在 <code>delta.tool_calls</code> 中输出，并在最后一个 chunk 以 <code>finish_reason="tool_calls"</code> 收尾。
+                        💡 当响应包含工具调用时，非流式会返回 <code>message.tool_calls</code> 且 <code>finish_reason="tool_calls"</code>；
+                        流式会在 <code>delta.tool_calls</code> 中逐步输出，最后以 <code>finish_reason="tool_calls"</code> 结束。
                     </p>
                 </div>
 
                 <div class="endpoint-card">
-                    <div class="method-badge method-get">GET</div>
-                    <strong>/health</strong>
-                    <p>健康检查端点</p>
+                    <div class="method-badge method-post">POST</div>
+                    <strong>错误响应格式</strong>
+                    <p>所有错误均以标准 JSON 格式返回</p>
                     <div class="code-block" style="margin-top: 15px;">
                         <button class="copy-btn" onclick="copyCode(this)">复制</button>
-                        <code>curl {{BASE_URL}}/health</code>
+                        <code># 认证失败 (401)
+{"error":{"message":"Invalid API key","type":"authentication_error","code":"invalid_api_key"}}
+
+# 参数错误 (400)
+{"error":{"message":"Invalid model: unknown","type":"invalid_request_error","code":"model_not_found"}}
+
+# 服务器错误 (502)
+{"error":{"message":"Internal server error","type":"internal_error","code":""}}</code>
                     </div>
                 </div>
             </div>

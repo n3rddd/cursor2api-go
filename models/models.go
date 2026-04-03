@@ -22,6 +22,7 @@ package models
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 )
 
@@ -252,12 +253,13 @@ type AssistantEvent struct {
 	ToolCall *ToolCall
 }
 
+// --- methods ---
+
 // GetStringContent 获取消息的字符串内容
 func (m *Message) GetStringContent() string {
 	if m.Content == nil {
 		return ""
 	}
-
 	switch content := m.Content.(type) {
 	case string:
 		return content
@@ -295,29 +297,22 @@ func ToCursorMessages(messages []Message, systemPromptInject string) []CursorMes
 
 	if systemPromptInject != "" {
 		if len(messages) > 0 && messages[0].Role == "system" {
-			content := messages[0].GetStringContent()
-			content += "\n" + systemPromptInject
+			content := messages[0].GetStringContent() + "\n" + systemPromptInject
 			result = append(result, CursorMessage{
-				Role: "system",
-				Parts: []CursorPart{
-					{Type: "text", Text: content},
-				},
+				Role:  "system",
+				Parts: []CursorPart{{Type: "text", Text: content}},
 			})
 			messages = messages[1:]
 		} else {
 			result = append(result, CursorMessage{
-				Role: "system",
-				Parts: []CursorPart{
-					{Type: "text", Text: systemPromptInject},
-				},
+				Role:  "system",
+				Parts: []CursorPart{{Type: "text", Text: systemPromptInject}},
 			})
 		}
 	} else if len(messages) > 0 && messages[0].Role == "system" {
 		result = append(result, CursorMessage{
-			Role: "system",
-			Parts: []CursorPart{
-				{Type: "text", Text: messages[0].GetStringContent()},
-			},
+			Role:  "system",
+			Parts: []CursorPart{{Type: "text", Text: messages[0].GetStringContent()}},
 		})
 		messages = messages[1:]
 	}
@@ -326,15 +321,12 @@ func ToCursorMessages(messages []Message, systemPromptInject string) []CursorMes
 		if msg.Role == "" {
 			continue
 		}
-
 		result = append(result, CursorMessage{
 			Role: msg.Role,
-			Parts: []CursorPart{
-				{
-					Type: "text",
-					Text: msg.GetStringContent(),
-				},
-			},
+			Parts: []CursorPart{{
+				Type: "text",
+				Text: msg.GetStringContent(),
+			}},
 		})
 	}
 
@@ -348,13 +340,11 @@ func NewChatCompletionResponse(id, model string, message Message, finishReason s
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   model,
-		Choices: []Choice{
-			{
-				Index:        0,
-				Message:      message,
-				FinishReason: finishReason,
-			},
-		},
+		Choices: []Choice{{
+			Index:        0,
+			Message:      message,
+			FinishReason: finishReason,
+		}},
 		Usage: usage,
 	}
 }
@@ -366,13 +356,11 @@ func NewChatCompletionStreamResponse(id, model string, delta StreamDelta, finish
 		Object:  "chat.completion.chunk",
 		Created: time.Now().Unix(),
 		Model:   model,
-		Choices: []StreamChoice{
-			{
-				Index:        0,
-				Delta:        delta,
-				FinishReason: finishReason,
-			},
-		},
+		Choices: []StreamChoice{{
+			Index:        0,
+			Delta:        delta,
+			FinishReason: finishReason,
+		}},
 	}
 }
 
@@ -385,4 +373,69 @@ func NewErrorResponse(message, errorType, code string) *ErrorResponse {
 			Code:    code,
 		},
 	}
+}
+
+// --- model config registry (lazy-init, thread-safe) ---
+
+var (
+	modelConfigsOnce sync.Once
+	modelConfigs     map[string]ModelConfig
+)
+
+func modelConfigsInit() {
+	modelConfigs = map[string]ModelConfig{
+		"gemini-3-flash": {
+			ID:            "gemini-3-flash",
+			Provider:      "Google",
+			MaxTokens:     100000,
+			ContextWindow: 100000,
+			CursorModel:   "google/gemini-3-flash",
+		},
+		"claude-sonnet-4.6": {
+			ID:            "claude-sonnet-4.6",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"anthropic/claude-sonnet-4.6": {
+			ID:            "anthropic/claude-sonnet-4.6",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"claude-sonnet-4-5-20250929": {
+			ID:            "claude-sonnet-4-5-20250929",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"claude-sonnet-4-20250514": {
+			ID:            "claude-sonnet-4-20250514",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+		"claude-3-5-sonnet-20241022": {
+			ID:            "claude-3-5-sonnet-20241022",
+			Provider:      "Anthropic",
+			MaxTokens:     200000,
+			ContextWindow: 200000,
+			CursorModel:   "anthropic/claude-sonnet-4.6",
+		},
+	}
+}
+
+// GetModelConfigs 获取所有基础模型配置 (thread-safe, lazy-init)
+func GetModelConfigs() map[string]ModelConfig {
+	modelConfigsOnce.Do(modelConfigsInit)
+	// return a copy to prevent external mutation
+	result := make(map[string]ModelConfig, len(modelConfigs))
+	for k, v := range modelConfigs {
+		result[k] = v
+	}
+	return result
 }

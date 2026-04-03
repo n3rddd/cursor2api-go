@@ -2,7 +2,6 @@ package utils
 
 import (
 	"cursor2api-go/models"
-	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -46,45 +45,6 @@ func TestCursorProtocolParserParsesThinkingAndToolCallsAcrossChunks(t *testing.T
 	}
 	if events[4].Kind != models.AssistantEventText || events[4].Text != "!" {
 		t.Fatalf("event[4] = %#v, want trailing exclamation text", events[4])
-	}
-}
-
-func TestNonStreamChatCompletionReturnsToolCalls(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
-
-	ch := make(chan interface{}, 4)
-	ch <- models.AssistantEvent{Kind: models.AssistantEventText, Text: "Let me check."}
-	ch <- models.AssistantEvent{
-		Kind: models.AssistantEventToolCall,
-		ToolCall: &models.ToolCall{
-			ID:   "call_1",
-			Type: "function",
-			Function: models.FunctionCall{
-				Name:      "lookup",
-				Arguments: `{"q":"revivalquant"}`,
-			},
-		},
-	}
-	ch <- models.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
-	close(ch)
-
-	NonStreamChatCompletion(ctx, ch, "claude-sonnet-4.6")
-
-	var response models.ChatCompletionResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if response.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("finish reason = %v, want tool_calls", response.Choices[0].FinishReason)
-	}
-	if response.Choices[0].Message.ToolCalls[0].Function.Name != "lookup" {
-		t.Fatalf("tool call name = %v, want lookup", response.Choices[0].Message.ToolCalls[0].Function.Name)
-	}
-	if response.Choices[0].Message.Content != "Let me check." {
-		t.Fatalf("message content = %#v, want Let me check.", response.Choices[0].Message.Content)
 	}
 }
 

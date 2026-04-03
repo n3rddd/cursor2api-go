@@ -32,6 +32,37 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Environment variable names
+const (
+	EnvPort               = "PORT"
+	EnvDebug              = "DEBUG"
+	EnvAPIKey             = "API_KEY"
+	EnvModels             = "MODELS"
+	EnvSystemPromptInject = "SYSTEM_PROMPT_INJECT"
+	EnvTimeout            = "TIMEOUT"
+	EnvMaxInputLength     = "MAX_INPUT_LENGTH"
+	EnvKiloToolStrict     = "KILO_TOOL_STRICT"
+	EnvScriptURL          = "SCRIPT_URL"
+	EnvUserAgent          = "USER_AGENT"
+	EnvVendorWebGL        = "UNMASKED_VENDOR_WEBGL"
+	EnvRendererWebGL      = "UNMASKED_RENDERER_WEBGL"
+)
+
+// Default values
+const (
+	DefaultPort           = 8002
+	DefaultDebug          = false
+	DefaultAPIKey         = "0000"
+	DefaultModels         = "gemini-3-flash"
+	DefaultTimeout        = 120
+	DefaultMaxInputLength = 200000
+	DefaultKiloToolStrict = false
+	DefaultScriptURL      = "https://cursor.com/_next/static/chunks/pages/_app.js"
+	DefaultUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+	DefaultVendorWebGL    = "Google Inc. (Intel)"
+	DefaultRendererWebGL  = "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+)
+
 // Config 应用程序配置结构
 type Config struct {
 	// 服务器配置
@@ -39,15 +70,15 @@ type Config struct {
 	Debug bool `json:"debug"`
 
 	// API配置
-	APIKey             string `json:"api_key"`
+	APIKey             string `json:"-"` // never serialize API key
 	Models             string `json:"models"`
 	SystemPromptInject string `json:"system_prompt_inject"`
 	Timeout            int    `json:"timeout"`
 	MaxInputLength     int    `json:"max_input_length"`
 
 	// 兼容性配置
-	// KILO_TOOL_STRICT=true 时：只要请求提供了 tools，就强制/强提示模型至少发起一次工具调用
-	// 以适配 Kilo Code 这类“必须用工具”的上层编排器。
+	// KILO_TOOL_STRICT=true: when the client provides tools, force at least one tool call
+	// to adapt to orchestrators like Kilo Code that require tool usage.
 	KiloToolStrict bool `json:"kilo_tool_strict"`
 
 	// Cursor相关配置
@@ -65,29 +96,25 @@ type FP struct {
 // LoadConfig 加载配置
 func LoadConfig() (*Config, error) {
 	// 尝试加载.env文件
-	if err := godotenv.Load(); err != nil {
-		logrus.Debug("No .env file found, using environment variables")
-	}
+	_ = godotenv.Load() // ignore error — env vars are fallback
 
 	config := &Config{
-		// 设置默认值
-		Port:               getEnvAsInt("PORT", 8002),
-		Debug:              getEnvAsBool("DEBUG", false),
-		APIKey:             getEnv("API_KEY", "0000"),
-		Models:             getEnv("MODELS", "gemini-3-flash"),
-		SystemPromptInject: getEnv("SYSTEM_PROMPT_INJECT", ""),
-		Timeout:            getEnvAsInt("TIMEOUT", 120),
-		MaxInputLength:     getEnvAsInt("MAX_INPUT_LENGTH", 200000),
-		KiloToolStrict:     getEnvAsBool("KILO_TOOL_STRICT", false),
-		ScriptURL:          getEnv("SCRIPT_URL", "https://cursor.com/_next/static/chunks/pages/_app.js"),
+		Port:               getEnvAsInt(EnvPort, DefaultPort),
+		Debug:              getEnvAsBool(EnvDebug, DefaultDebug),
+		APIKey:             getEnv(EnvAPIKey, DefaultAPIKey),
+		Models:             getEnv(EnvModels, DefaultModels),
+		SystemPromptInject: getEnv(EnvSystemPromptInject, ""),
+		Timeout:            getEnvAsInt(EnvTimeout, DefaultTimeout),
+		MaxInputLength:     getEnvAsInt(EnvMaxInputLength, DefaultMaxInputLength),
+		KiloToolStrict:     getEnvAsBool(EnvKiloToolStrict, DefaultKiloToolStrict),
+		ScriptURL:          getEnv(EnvScriptURL, DefaultScriptURL),
 		FP: FP{
-			UserAgent:               getEnv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"),
-			UNMASKED_VENDOR_WEBGL:   getEnv("UNMASKED_VENDOR_WEBGL", "Google Inc. (Intel)"),
-			UNMASKED_RENDERER_WEBGL: getEnv("UNMASKED_RENDERER_WEBGL", "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+			UserAgent:               getEnv(EnvUserAgent, DefaultUserAgent),
+			UNMASKED_VENDOR_WEBGL:   getEnv(EnvVendorWebGL, DefaultVendorWebGL),
+			UNMASKED_RENDERER_WEBGL: getEnv(EnvRendererWebGL, DefaultRendererWebGL),
 		},
 	}
 
-	// 验证必要的配置
 	if err := config.validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
@@ -98,21 +125,17 @@ func LoadConfig() (*Config, error) {
 // validate 验证配置
 func (c *Config) validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
-		return fmt.Errorf("invalid port: %d", c.Port)
+		return fmt.Errorf("invalid port: %d (must be 1-65535)", c.Port)
 	}
-
 	if c.APIKey == "" {
 		return fmt.Errorf("API_KEY is required")
 	}
-
 	if c.Timeout <= 0 {
-		return fmt.Errorf("timeout must be positive")
+		return fmt.Errorf("TIMEOUT must be positive, got %d", c.Timeout)
 	}
-
 	if c.MaxInputLength <= 0 {
-		return fmt.Errorf("max input length must be positive")
+		return fmt.Errorf("MAX_INPUT_LENGTH must be positive, got %d", c.MaxInputLength)
 	}
-
 	return nil
 }
 
@@ -128,7 +151,7 @@ func (c *Config) GetBaseModels() []string {
 	return result
 }
 
-// GetModels 获取模型列表
+// GetModels 获取模型列表（自动展开 -thinking 变体）
 func (c *Config) GetModels() []string {
 	return models.ExpandModelList(c.GetBaseModels())
 }
@@ -144,22 +167,25 @@ func (c *Config) IsValidModel(model string) bool {
 	return false
 }
 
+// MaskedAPIKey 返回掩码后的 API 密钥
+func (c *Config) MaskedAPIKey() string {
+	if len(c.APIKey) <= 4 {
+		return "****"
+	}
+	return c.APIKey[:4] + "****"
+}
+
 // ToJSON 将配置序列化为JSON（用于调试）
 func (c *Config) ToJSON() string {
-	// 创建一个副本，隐藏敏感信息
-	safeCfg := *c
-	safeCfg.APIKey = "***"
-
-	data, err := json.MarshalIndent(safeCfg, "", "  ")
+	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Sprintf("Error marshaling config: %v", err)
 	}
 	return string(data)
 }
 
-// 辅助函数
+// --- helpers ---
 
-// getEnv 获取环境变量，如果不存在则返回默认值
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -167,34 +193,28 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvAsInt 获取环境变量并转换为int
 func getEnvAsInt(key string, defaultValue int) int {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
 	}
-
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
-		logrus.Warnf("Invalid integer value for %s: %s, using default: %d", key, valueStr, defaultValue)
+		logrus.Warnf("Invalid integer value for %s: %q, using default: %d", key, valueStr, defaultValue)
 		return defaultValue
 	}
-
 	return value
 }
 
-// getEnvAsBool 获取环境变量并转换为bool
 func getEnvAsBool(key string, defaultValue bool) bool {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
 	}
-
 	value, err := strconv.ParseBool(valueStr)
 	if err != nil {
-		logrus.Warnf("Invalid boolean value for %s: %s, using default: %t", key, valueStr, defaultValue)
+		logrus.Warnf("Invalid boolean value for %s: %q, using default: %t", key, valueStr, defaultValue)
 		return defaultValue
 	}
-
 	return value
 }

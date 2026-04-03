@@ -28,188 +28,83 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// CursorWebError Cursor Web API错误
+// CursorWebError represents an error from the Cursor Web API.
 type CursorWebError struct {
 	StatusCode int    `json:"status_code"`
 	Message    string `json:"message"`
 }
 
-// Error 实现error接口
-func (e *CursorWebError) Error() string {
-	return e.Message
-}
+func (e *CursorWebError) Error() string { return e.Message }
 
-// NewCursorWebError 创建新的CursorWebError
+// NewCursorWebError creates a new CursorWebError.
 func NewCursorWebError(statusCode int, message string) *CursorWebError {
-	return &CursorWebError{
-		StatusCode: statusCode,
-		Message:    message,
-	}
+	return &CursorWebError{StatusCode: statusCode, Message: message}
 }
 
-// ErrorHandler 全局错误处理中间件
-func ErrorHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Next()
-
-		// 处理上下文中的错误
-		if len(c.Errors) > 0 {
-			err := c.Errors.Last().Err
-			handleError(c, err)
-		}
-	}
-}
-
-// HandleError 处理错误并返回适当的响应
-func HandleError(c *gin.Context, err error) {
-	handleError(c, err)
-}
-
-// handleError 内部错误处理逻辑
-func handleError(c *gin.Context, err error) {
-	// 如果已经写入了响应头，则不再处理
-	if c.Writer.Written() {
-		return
-	}
-
-	logrus.WithError(err).Error("API error occurred")
-
-	switch e := err.(type) {
-	case *CursorWebError:
-		// 处理Cursor Web错误
-		errorResponse := models.NewErrorResponse(
-			e.Message,
-			"cursor_web_error",
-			"",
-		)
-		c.JSON(e.StatusCode, errorResponse)
-
-	case *gin.Error:
-		// 处理Gin绑定错误
-		statusCode := http.StatusBadRequest
-		if e.Type == gin.ErrorTypePublic {
-			statusCode = http.StatusInternalServerError
-		}
-
-		errorResponse := models.NewErrorResponse(
-			e.Error(),
-			"validation_error",
-			"invalid_request",
-		)
-		c.JSON(statusCode, errorResponse)
-
-	case *RequestValidationError:
-		errorResponse := models.NewErrorResponse(
-			e.Message,
-			"invalid_request_error",
-			e.Code,
-		)
-		c.JSON(http.StatusBadRequest, errorResponse)
-
-	default:
-		// 处理其他错误
-		errorResponse := models.NewErrorResponse(
-			"Internal server error",
-			"internal_error",
-			"",
-		)
-		c.JSON(http.StatusInternalServerError, errorResponse)
-	}
-}
-
-// RequestValidationError 请求参数验证错误
+// RequestValidationError represents a request validation error.
 type RequestValidationError struct {
 	Message string `json:"message"`
 	Code    string `json:"code,omitempty"`
 }
 
-// Error 实现 error 接口
-func (e *RequestValidationError) Error() string {
-	return e.Message
+func (e *RequestValidationError) Error() string { return e.Message }
+
+// NewRequestValidationError creates a new RequestValidationError.
+func NewRequestValidationError(message, code string) *RequestValidationError {
+	return &RequestValidationError{Message: message, Code: code}
 }
 
-// NewRequestValidationError 创建请求参数验证错误
-func NewRequestValidationError(message, code string) *RequestValidationError {
-	return &RequestValidationError{
-		Message: message,
-		Code:    code,
+// ErrorHandler creates a global error handling middleware.
+func ErrorHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		if len(c.Errors) > 0 {
+			handleError(c, c.Errors.Last().Err)
+		}
 	}
 }
 
-// RecoveryHandler 自定义恢复中间件
+// HandleError dispatches an error to the appropriate HTTP response.
+func HandleError(c *gin.Context, err error) {
+	handleError(c, err)
+}
+
+func handleError(c *gin.Context, err error) {
+	if c.Writer.Written() {
+		return
+	}
+
+	logrus.WithError(err).Error("API error")
+
+	var statusCode int
+	var errorType, code string
+
+	switch e := err.(type) {
+	case *CursorWebError:
+		statusCode = e.StatusCode
+		errorType = "cursor_web_error"
+		code = ""
+	case *RequestValidationError:
+		statusCode = http.StatusBadRequest
+		errorType = "invalid_request_error"
+		code = e.Code
+	default:
+		statusCode = http.StatusBadGateway
+		errorType = "internal_error"
+		code = ""
+	}
+
+	c.JSON(statusCode, models.NewErrorResponse(err.Error(), errorType, code))
+}
+
+// RecoveryHandler creates a custom panic recovery middleware.
 func RecoveryHandler() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
-		logrus.WithField("panic", recovered).Error("Panic occurred")
-
-		if c.Writer.Written() {
-			return
+		logrus.WithField("panic", recovered).Error("Panic recovered")
+		if !c.Writer.Written() {
+			c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+				"Internal server error", "panic_error", "",
+			))
 		}
-
-		errorResponse := models.NewErrorResponse(
-			"Internal server error",
-			"panic_error",
-			"",
-		)
-		c.JSON(http.StatusInternalServerError, errorResponse)
 	})
-}
-
-// ValidationError 验证错误
-type ValidationError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
-}
-
-// MultipleValidationError 多个验证错误
-type MultipleValidationError struct {
-	Errors []ValidationError `json:"errors"`
-}
-
-// Error 实现error接口
-func (e *MultipleValidationError) Error() string {
-	return "validation failed"
-}
-
-// NewValidationError 创建验证错误
-func NewValidationError(field, message string) *ValidationError {
-	return &ValidationError{
-		Field:   field,
-		Message: message,
-	}
-}
-
-// AuthenticationError 认证错误
-type AuthenticationError struct {
-	Message string `json:"message"`
-}
-
-// Error 实现error接口
-func (e *AuthenticationError) Error() string {
-	return e.Message
-}
-
-// NewAuthenticationError 创建认证错误
-func NewAuthenticationError(message string) *AuthenticationError {
-	return &AuthenticationError{
-		Message: message,
-	}
-}
-
-// RateLimitError 限流错误
-type RateLimitError struct {
-	Message    string `json:"message"`
-	RetryAfter int    `json:"retry_after"`
-}
-
-// Error 实现error接口
-func (e *RateLimitError) Error() string {
-	return e.Message
-}
-
-// NewRateLimitError 创建限流错误
-func NewRateLimitError(message string, retryAfter int) *RateLimitError {
-	return &RateLimitError{
-		Message:    message,
-		RetryAfter: retryAfter,
-	}
 }
