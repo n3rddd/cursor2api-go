@@ -123,12 +123,24 @@ func (s *CursorService) ChatCompletion(ctx context.Context, request *models.Chat
 			"attempt":        attempt,
 		}).Debug("Sending request to Cursor API")
 
-		resp, err := s.client.R().
-			SetContext(ctx).
-			SetHeaders(headers).
-			SetBody(jsonPayload).
-			DisableAutoReadResponse().
-			Post(cursorAPIURL)
+		// Add browser cookies if configured
+		var resp *req.Response
+		if s.config.CursorCookie != "" {
+			resp, err = s.client.R().
+				SetContext(ctx).
+				SetHeaders(headers).
+				SetHeader("Cookie", s.config.CursorCookie).
+				SetBody(jsonPayload).
+				DisableAutoReadResponse().
+				Post(cursorAPIURL)
+		} else {
+			resp, err = s.client.R().
+				SetContext(ctx).
+				SetHeaders(headers).
+				SetBody(jsonPayload).
+				DisableAutoReadResponse().
+				Post(cursorAPIURL)
+		}
 		if err != nil {
 			if attempt < maxRetries {
 				logrus.WithError(err).Warnf("Cursor request failed (attempt %d/%d), retrying...", attempt, maxRetries)

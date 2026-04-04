@@ -43,6 +43,7 @@ const (
 	EnvMaxInputLength     = "MAX_INPUT_LENGTH"
 	EnvKiloToolStrict     = "KILO_TOOL_STRICT"
 	EnvScriptURL          = "SCRIPT_URL"
+	EnvCursorCookie       = "CURSOR_COOKIE"
 	EnvUserAgent          = "USER_AGENT"
 	EnvVendorWebGL        = "UNMASKED_VENDOR_WEBGL"
 	EnvRendererWebGL      = "UNMASKED_RENDERER_WEBGL"
@@ -58,6 +59,7 @@ const (
 	DefaultMaxInputLength = 200000
 	DefaultKiloToolStrict = false
 	DefaultScriptURL      = "https://cursor.com/_next/static/chunks/pages/_app.js"
+	DefaultCursorCookie   = ""
 	DefaultUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 	DefaultVendorWebGL    = "Google Inc. (Intel)"
 	DefaultRendererWebGL  = "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"
@@ -82,8 +84,9 @@ type Config struct {
 	KiloToolStrict bool `json:"kilo_tool_strict"`
 
 	// Cursor相关配置
-	ScriptURL string `json:"script_url"`
-	FP        FP     `json:"fp"`
+	ScriptURL    string `json:"script_url"`
+	CursorCookie string `json:"-"` // never serialize cookie
+	FP           FP     `json:"fp"`
 }
 
 // FP 指纹配置结构
@@ -108,6 +111,7 @@ func LoadConfig() (*Config, error) {
 		MaxInputLength:     getEnvAsInt(EnvMaxInputLength, DefaultMaxInputLength),
 		KiloToolStrict:     getEnvAsBool(EnvKiloToolStrict, DefaultKiloToolStrict),
 		ScriptURL:          getEnv(EnvScriptURL, DefaultScriptURL),
+		CursorCookie:       getEnv(EnvCursorCookie, DefaultCursorCookie),
 		FP: FP{
 			UserAgent:               getEnv(EnvUserAgent, DefaultUserAgent),
 			UNMASKED_VENDOR_WEBGL:   getEnv(EnvVendorWebGL, DefaultVendorWebGL),
